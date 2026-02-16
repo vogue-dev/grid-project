@@ -15,7 +15,9 @@ const server = createServer(app);
 const { setupPgListener } = attachRealtime(server);
 
 const start = async () => {
-  await initDb();
+  if (process.env.INIT_DB === "true") {
+    await initDb();
+  }
   await setupPgListener();
 
   const PORT = Number(process.env.PORT ?? 8080);

@@ -23,49 +23,57 @@ export const pool = new Pool({
 });
 
 export const initDb = async () => {
+  const client = await pool.connect();
   const textSchema = textCols.map((c) => `${c} TEXT NOT NULL`).join(",\n");
   const numSchema = numCols.map((c) => `${c} INTEGER NOT NULL DEFAULT 0`).join(",\n");
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS creative_rows (
-      id BIGSERIAL PRIMARY KEY,
-      version INTEGER NOT NULL DEFAULT 1,
-      title TEXT NOT NULL,
-      budget NUMERIC(12,2) NOT NULL DEFAULT 0,
-      status TEXT NOT NULL,
-      ${textSchema},
-      ${numSchema},
-      category TEXT NOT NULL,
-      channel TEXT NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  // Prevent concurrent schema/seed runs when multiple backend nodes start together.
+  await client.query("SELECT pg_advisory_lock($1)", [424242]);
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS creative_rows (
+        id BIGSERIAL PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
+        title TEXT NOT NULL,
+        budget NUMERIC(12,2) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        ${textSchema},
+        ${numSchema},
+        category TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    const total = await client.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM creative_rows");
+    const count = Number(total.rows[0]?.count ?? 0);
+    if (count >= TARGET_ROWS) return;
+
+    const textSelect = textCols.map((_, i) => `'txt_' || g || '_${i + 1}'`).join(",\n");
+    const numSelect = numCols.map(() => "floor(random() * 1000)::int").join(",\n");
+    const missing = TARGET_ROWS - count;
+
+    await client.query(
+      `
+        INSERT INTO creative_rows (
+          title, budget, status, ${textCols.join(", ")}, ${numCols.join(", ")}, category, channel
+        )
+        SELECT
+          'Creative #' || g,
+          ((random() * 9000) + 100)::numeric(12,2),
+          (ARRAY['todo','in_progress','done','blocked'])[floor(random() * 4 + 1)],
+          ${textSelect},
+          ${numSelect},
+          (ARRAY['creative','video','image','copy'])[floor(random() * 4 + 1)],
+          (ARRAY['meta','tiktok','google','x'])[floor(random() * 4 + 1)]
+        FROM generate_series(1, $1) g;
+      `,
+      [missing]
     );
-  `);
-
-  const total = await pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM creative_rows");
-  const count = Number(total.rows[0]?.count ?? 0);
-  if (count >= TARGET_ROWS) return;
-
-  const textSelect = textCols.map((_, i) => `'txt_' || g || '_${i + 1}'`).join(",\n");
-  const numSelect = numCols.map(() => "floor(random() * 1000)::int").join(",\n");
-  const missing = TARGET_ROWS - count;
-
-  await pool.query(
-    `
-      INSERT INTO creative_rows (
-        title, budget, status, ${textCols.join(", ")}, ${numCols.join(", ")}, category, channel
-      )
-      SELECT
-        'Creative #' || g,
-        ((random() * 9000) + 100)::numeric(12,2),
-        (ARRAY['todo','in_progress','done','blocked'])[floor(random() * 4 + 1)],
-        ${textSelect},
-        ${numSelect},
-        (ARRAY['creative','video','image','copy'])[floor(random() * 4 + 1)],
-        (ARRAY['meta','tiktok','google','x'])[floor(random() * 4 + 1)]
-      FROM generate_series(1, $1) g;
-    `,
-    [missing]
-  );
+  } finally {
+    await client.query("SELECT pg_advisory_unlock($1)", [424242]);
+    client.release();
+  }
 };
 
 export const getRows = async (limit: number, offset: number) => {

@@ -28,6 +28,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: grid_project
       SEED_ROWS: 50000
+      INIT_DB: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +44,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: grid_project
       SEED_ROWS: 50000
+      INIT_DB: "false"
     depends_on:
       postgres:
         condition: service_healthy
