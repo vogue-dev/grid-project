@@ -1,0 +1,72 @@
+name: grid-project
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: martech
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d martech"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend1:
+    build:
+      context: ./backend
+    environment:
+      PORT: 8080
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: martech
+      SEED_ROWS: 50000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend2:
+    build:
+      context: ./backend
+    environment:
+      PORT: 8080
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: martech
+      SEED_ROWS: 50000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend1
+      - backend2
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE: http://localhost:8080/api
+      VITE_WS_BASE: ws://localhost:8080
+    ports:
+      - "5173:5173"
+    depends_on:
+      - nginx
+
+volumes:
+  pgdata:
